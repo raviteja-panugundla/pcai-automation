@@ -88,8 +88,11 @@ echo "Firewall check complete."
 
 INPUT_FILE="input.txt"
 
-if [[ -z "$INPUT_FILE" || ! -f "$INPUT_FILE" ]]; then
-    echo "Usage: $0 <input_file>"
+
+# Check if input.txt exists
+if [[ ! -f "$INPUT_FILE" ]]; then
+    echo "❌ ERROR: '$INPUT_FILE' not found in the current directory."
+    echo "Please create input.txt with format: <IP> <FQDN>"
     exit 1
 fi
 
