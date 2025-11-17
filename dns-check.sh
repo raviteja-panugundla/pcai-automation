@@ -1,6 +1,6 @@
 #!/bin/bash
 
-INPUT_FILE="$1"
+INPUT_FILE="input.txt"
 
 if [[ -z "$INPUT_FILE" || ! -f "$INPUT_FILE" ]]; then
     echo "Usage: $0 <input_file>"
