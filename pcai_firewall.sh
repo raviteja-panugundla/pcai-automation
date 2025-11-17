@@ -7,7 +7,6 @@ REGION=${REGION:-jp1}
 
 URLS=(
   "https://console.greenlake.hpe.com"
-  "https://${REGION}-ext-api.common.cloud.hpe.com"
   "https://${REGION}.data.cloud.hpe.com"
   "https://tunnel-${REGION}.data.cloud.hpe.com"
   "https://console-${REGION}.data.cloud.hpe.com"
