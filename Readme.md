@@ -3,7 +3,7 @@
 
 This repository contains simple automation scripts that help with **firewall connectivity checks** and **DNS validation** for PCAI and Developer systems.
 
-These scripts are lightweight and can be run directly on customer VMs during pre-checks before deployment.
+These scripts are lightweight and can be run directly on customer worker scs02 node or preferable some other node such as glfs which has access to internet VMs during pre-checks before deployment.
 
 ---
 
@@ -27,7 +27,7 @@ This script checks **TCP connectivity** (port 443) to all required URLs for PCAI
 ### **Usage**
 
 ```bash
-bash <(curl -sL "https://github.com/<your-repo>/raw/main/firewall.sh")
+bash <(curl -sL "https://github.com/raviteja-panugundla/pcai-automation/raw/main/firewall.sh")
 ```
 
 It will ask:
@@ -87,7 +87,7 @@ Ideal for **full pre-check** before upgrades / deployments.
 ### **Usage**
 
 ```bash
-bash <(curl -sL "https://github.com/<your-repo>/raw/main/firewall-pcai-dns.sh")
+bash <(curl -sL "https://github.com/raviteja-panugundla/pcai-automation/raw/main/firewall-pcai-dns.sh")
 ```
 
 You will be prompted for:
@@ -107,7 +107,7 @@ Update this file with actual customer data before running `dns-check.sh` or `fir
 
 ---
 
-## 📦 **Download & Run Directly (curl)**
+## 📦 **Run Directly (curl) in customer worker scs02 node or preferable some other node such as glfs which has access to internet**
 
 Because GitHub **raw.githubusercontent.com** is often blocked in customer sites, use this format:
 
