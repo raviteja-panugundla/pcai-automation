@@ -1,0 +1,11 @@
+192.168.53.13	iLO Management	scs01	ilo-scs01		server-001	DL325	ilo-scs01
+192.168.53.2	Control Nodes Management	scs01	ilo-scs01		server-001	DL325	scs01
+192.168.53.14	iLO Management	scs02	ilo-scs02		server-004	DL380a	ilo-scs02
+192.168.53.22	Worker Nodes Management	scs02	ilo-scs02		server-004	DL380a	scs02
+192.168.53.31	Management	ez-master01		ez-master01	vm-001	MVM	ez-master01
+192.168.53.32	Management	ez-fab		ez-fab	vm-002	MVM	ez-fab
+192.168.53.33	Management	dsc-vm01		dsc-vm01	vm-003	MVM	dsc-vm01
+192.168.53.34	Management	morpheus		morpheus	vm-004	MVM	morpheus
+192.168.53.35	Management	ai-application			service-001		*.ai-application.scsvc.com
+192.168.53.36	Management	ai-cluster			service-002		ai-cluster
+
