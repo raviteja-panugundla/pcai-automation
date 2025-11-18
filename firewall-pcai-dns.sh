@@ -106,8 +106,10 @@ declare -a summary
 
 index=1
 
-while read -r ip fqdn; do
+while read -r ip fqdn _; do
+
     [[ -z "$ip" || -z "$fqdn" ]] && continue
+    [[ "$ip" == "IP" ]] && continue   # Skip header row
 
     echo "============================================================="
     echo "IP Address:   $ip"
