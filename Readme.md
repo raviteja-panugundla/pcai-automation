@@ -87,7 +87,7 @@ Ideal for **full pre-check** before upgrades / deployments.
 ### **Usage**
 
 ```bash
-bash <(curl -sL "https://github.com/raviteja-panugundla/pcai-automation/raw/main/firewall-pcai-dns.sh")
+bash <(curl -s -H "Accept: application/vnd.github.raw" https://api.github.com/repos/raviteja-panugundla/pcai-automation/contents/firewall-pcai-dns.sh)
 ```
 
 You will be prompted for:
@@ -113,7 +113,7 @@ Because GitHub **raw.githubusercontent.com** is often blocked in customer sites,
 
 
 ```bash
-bash <(curl -sL "https://github.com/raviteja-panugundla/pcai-automation/raw/main/firewall-pcai-dns.sh")
+bash <(curl -s -H "Accept: application/vnd.github.raw" https://api.github.com/repos/raviteja-panugundla/pcai-automation/contents/firewall-pcai-dns.sh)
 ```
 
 ---
