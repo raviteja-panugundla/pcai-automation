@@ -85,9 +85,7 @@ done
 
 echo "--------------------------------------------------------------"
 echo "Firewall check complete."
-
 INPUT_FILE="input.txt"
-
 
 # Check if input.txt exists
 if [[ ! -f "$INPUT_FILE" ]]; then
@@ -103,6 +101,11 @@ strip_domain() {
     echo "$1" | cut -d'.' -f1
 }
 
+# For storing result summary
+declare -a summary
+
+index=1
+
 while read -r ip fqdn; do
     [[ -z "$ip" || -z "$fqdn" ]] && continue
 
@@ -111,7 +114,6 @@ while read -r ip fqdn; do
     echo "FQDN:         $fqdn"
     echo "-------------------------------------------------------------"
 
-    # Expected base hostname from input file
     input_base=$(strip_domain "$fqdn")
 
     ### Reverse Lookup ###
@@ -143,7 +145,6 @@ while read -r ip fqdn; do
     ### Comparison ###
     echo "Comparison Result:"
 
-    # Hostname match rules
     hostname_ok=false
     if [[ "$ptr_base" == "$input_base" && "$a_base" == "$input_base" ]]; then
         hostname_ok=true
@@ -156,13 +157,30 @@ while read -r ip fqdn; do
 
     if $hostname_ok && $ip_ok; then
         echo "  ✅ TRUE — Forward & Reverse match (hostname + IP)"
+        summary+=("[$index] $ip $fqdn => TRUE")
     else
         echo "  ❌ FALSE — mismatch"
         [[ "$ptr_base" != "$input_base" ]] && echo "     - PTR hostname ($ptr_base) != expected ($input_base)"
         [[ "$a_base" != "$input_base" ]] && echo "     - Forward hostname ($a_base) != expected ($input_base)"
         [[ "$a_ip" != "$ip" ]] && echo "     - A record IP ($a_ip) != expected IP ($ip)"
+
+        summary+=("[$index] $ip $fqdn => FALSE")
     fi
 
     echo
+    ((index++))
 
 done < "$INPUT_FILE"
+
+# Final Summary
+echo
+echo "============================================================="
+echo "Final Summary (TRUE/FALSE for all entries)"
+echo "============================================================="
+
+for result in "${summary[@]}"; do
+    echo "$result"
+done
+
+echo "============================================================="
+
