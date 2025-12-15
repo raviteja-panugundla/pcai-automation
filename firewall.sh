@@ -67,22 +67,31 @@ else
     "https://hooks.slack.com"
   )
 fi
-
 echo
-echo "Checking TCP reachability for required URLs (region: $REGION)"
-echo "--------------------------------------------------------------"
+echo "Checking HTTP reachability for required URLs (region: $REGION, mode: $MODE)"
+echo "--------------------------------------------------------------------------------"
+
+PASS_COUNT=0
+FAIL_COUNT=0
 
 for url in "${URLS[@]}"; do
-  host=$(echo "$url" | awk -F/ '{print $3}')
-  printf "%-65s" "$host"
+  # Print the URL (nicely formatted)
+  printf "%-70s" "$url"
 
-  if timeout 5 bash -c "</dev/tcp/$host/443" &>/dev/null; then
-    echo "ø Reachable"
+  # usage of curl:
+  # -k : Ignore SSL errors (matches your manual test)
+  # -s : Silent (don't show progress bar)
+  # -o /dev/null : Dump the output (we don't need the HTML)
+  # --connect-timeout 5 : Don't wait forever
+  
+  if curl -k -s -o /dev/null --connect-timeout 5 "$url"; then
+    echo "‚úÖ Reachable"
+    ((PASS_COUNT++))
   else
-    echo "ø Not reachable"
+    echo "‚ùå Not reachable"
+    ((FAIL_COUNT++))
   fi
 done
-
 echo "--------------------------------------------------------------"
 echo "Firewall check complete."
 
@@ -152,9 +161,9 @@ while read -r ip fqdn; do
     fi
 
     if $hostname_ok && $ip_ok; then
-        echo "  ø TRUE ø Forward & Reverse match (hostname + IP)"
+        echo "  ¬ø TRUE ¬ø Forward & Reverse match (hostname + IP)"
     else
-        echo "  ø FALSE ø mismatch"
+        echo "  ¬ø FALSE ¬ø mismatch"
         [[ "$ptr_base" != "$input_base" ]] && echo "     - PTR hostname ($ptr_base) != expected ($input_base)"
         [[ "$a_base" != "$input_base" ]] && echo "     - Forward hostname ($a_base) != expected ($input_base)"
         [[ "$a_ip" != "$ip" ]] && echo "     - A record IP ($a_ip) != expected IP ($ip)"
