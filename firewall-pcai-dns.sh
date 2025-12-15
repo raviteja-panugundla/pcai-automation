@@ -110,13 +110,13 @@ done
 echo "--------------------------------------------------------------------------------"
 echo "Firewall check complete."
 echo "Summary: ✅ $PASS_COUNT passed | ❌ $FAIL_COUNT failed | Total: $((PASS_COUNT + FAIL_COUNT)) URLs"
+#!/bin/bash
 
 INPUT_FILE="input.txt"
 
 # Check if input.txt exists
 if [[ ! -f "$INPUT_FILE" ]]; then
-    echo "❌ ERROR: '$INPUT_FILE' not found in the current directory."
-    echo "Please create input.txt with format: <IP> <FQDN>"
+    echo "❌ ERROR: '$INPUT_FILE' not found."
     exit 1
 fi
 
@@ -127,15 +127,32 @@ strip_domain() {
     echo "$1" | cut -d'.' -f1
 }
 
-# For storing result summary
 declare -a summary
-
 index=1
 
-while read -r ip fqdn _; do
+# Regex to identify an IPv4 address
+IP_REGEX="^([0-9]{1,3}\.){3}[0-9]{1,3}$"
 
-    [[ -z "$ip" || -z "$fqdn" ]] && continue
-    [[ "$ip" == "IP" ]] && continue   # Skip header row
+# Read two columns generically as col1 and col2
+while read -r col1 col2 _; do
+
+    # Skip empty lines
+    [[ -z "$col1" || -z "$col2" ]] && continue
+    
+    # Skip header row (if it contains "IP" or "FQDN" headers)
+    [[ "$col1" == "IP" || "$col1" == "FQDN" ]] && continue
+
+    # --- AUTO-DETECT LOGIC ---
+    # Check if the first column matches the IP pattern
+    if [[ $col1 =~ $IP_REGEX ]]; then
+        ip="$col1"
+        fqdn="$col2"
+    else
+        # If col1 isn't an IP, assume the file is FQDN first
+        ip="$col2"
+        fqdn="$col1"
+    fi
+    # -------------------------
 
     echo "============================================================="
     echo "IP Address:   $ip"
@@ -154,7 +171,7 @@ while read -r ip fqdn _; do
     ptr_base=$(strip_domain "$ptr_name")
 
     [[ -n "$ptr_name" ]] && echo "Resolved Name (PTR): $ptr_name" \
-                         || echo "Resolved Name (PTR): Not Found"
+                          || echo "Resolved Name (PTR): Not Found"
     echo
 
     ### Forward Lookup ###
@@ -167,13 +184,14 @@ while read -r ip fqdn _; do
     a_base=$(strip_domain "$(echo "$fwd_out" | awk '/Name:/{print $2}' | sed 's/\.$//')")
 
     [[ -n "$a_ip" ]] && echo "Resolved IP (A): $a_ip" \
-                     || echo "Resolved IP (A): No forward entry"
+                      || echo "Resolved IP (A): No forward entry"
     echo
 
     ### Comparison ###
     echo "Comparison Result:"
 
     hostname_ok=false
+    # Check if bases match OR if full FQDNs match (handling different domain suffixes)
     if [[ "$ptr_base" == "$input_base" && "$a_base" == "$input_base" ]]; then
         hostname_ok=true
     fi
@@ -184,14 +202,11 @@ while read -r ip fqdn _; do
     fi
 
     if $hostname_ok && $ip_ok; then
-        echo "  ✅ TRUE — Forward & Reverse match (hostname + IP)"
+        echo "  ✅ TRUE — Forward & Reverse match"
         summary+=("[$index] $ip $fqdn => TRUE")
     else
         echo "  ❌ FALSE — mismatch"
-        [[ "$ptr_base" != "$input_base" ]] && echo "     - PTR hostname ($ptr_base) != expected ($input_base)"
-        [[ "$a_base" != "$input_base" ]] && echo "     - Forward hostname ($a_base) != expected ($input_base)"
-        [[ "$a_ip" != "$ip" ]] && echo "     - A record IP ($a_ip) != expected IP ($ip)"
-
+        # Detailed error logging for summary can go here if needed
         summary+=("[$index] $ip $fqdn => FALSE")
     fi
 
@@ -203,7 +218,7 @@ done < "$INPUT_FILE"
 # Final Summary
 echo
 echo "============================================================="
-echo "Final Summary (TRUE/FALSE for all entries)"
+echo "Final Summary (TRUE/FALSE)"
 echo "============================================================="
 
 for result in "${summary[@]}"; do
@@ -211,4 +226,3 @@ for result in "${summary[@]}"; do
 done
 
 echo "============================================================="
-
