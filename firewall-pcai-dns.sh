@@ -1,11 +1,11 @@
 #!/bin/bash
-# Connectivity check for required GreenLake & RedHat URLs (TCP-level)
+# Connectivity check for required GreenLake & RedHat URLs (HTTP/HTTPS level)
 # Unified Firewall Precheck Script (DEV + PCAI + PCAI Gen2)
 
 echo "Select System Type:"
-echo "  1) dev        - Developer system firewall rules"
-echo "  2) pcai-gen1  - Standard PCAI system firewall rules"
-echo "  3) pcai-gen2  - PCAI Gen2 system firewall rules"
+echo "  1) dev         - Developer system firewall rules"
+echo "  2) pcai-gen1   - Standard PCAI system firewall rules"
+echo "  3) pcai-gen2   - PCAI Gen2 system firewall rules"
 echo
 read -p "Enter choice [1/2/3]: " CHOICE
 
@@ -54,7 +54,7 @@ case "$MODE" in
       "https://cdn.redhat.com"
     )
     ;;
-  
+   
   pcai-gen1)
     echo "Selected: Standard PCAI System (full firewall rules)"
     MODE_SPECIFIC_URLS=(
@@ -69,7 +69,7 @@ case "$MODE" in
       "https://hooks.slack.com"
     )
     ;;
-  
+   
   pcai-gen2)
     echo "Selected: PCAI Gen2 System (full firewall rules)"
     MODE_SPECIFIC_URLS=(
@@ -88,17 +88,22 @@ esac
 URLS=("${COMMON_URLS[@]}" "${MODE_SPECIFIC_URLS[@]}")
 
 echo
-echo "Checking TCP reachability for required URLs (region: $REGION, mode: $MODE)"
+echo "Checking Reachability (using curl) for required URLs (region: $REGION, mode: $MODE)"
 echo "--------------------------------------------------------------------------------"
 
 PASS_COUNT=0
 FAIL_COUNT=0
 
 for url in "${URLS[@]}"; do
-  host=$(echo "$url" | awk -F/ '{print $3}')
-  printf "%-70s" "$host"
+  # Print the URL clearly
+  printf "%-70s" "$url"
 
-  if timeout 5 bash -c "</dev/tcp/$host/443" &>/dev/null; then
+  # Use curl to check connectivity
+  # -k : Ignore SSL errors (matches your manual test)
+  # -s : Silent mode (no progress bar)
+  # -o /dev/null : Discard output
+  # --connect-timeout 5 : Fail if it takes too long
+  if curl -k -s -o /dev/null --connect-timeout 5 "$url"; then
     echo "✅ Reachable"
     ((PASS_COUNT++))
   else
@@ -110,7 +115,6 @@ done
 echo "--------------------------------------------------------------------------------"
 echo "Firewall check complete."
 echo "Summary: ✅ $PASS_COUNT passed | ❌ $FAIL_COUNT failed | Total: $((PASS_COUNT + FAIL_COUNT)) URLs"
-#!/bin/bash
 
 INPUT_FILE="input.txt"
 
