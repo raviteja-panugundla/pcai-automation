@@ -7,7 +7,7 @@ These scripts are lightweight and can be run directly on customer worker scs02 n
 
 ---
 
-## 📁 **Repository Structure**
+## **Repository Structure**
 
 ```
 pcai-automation/
@@ -20,7 +20,7 @@ pcai-automation/
 
 ---
 
-## 🔥 **1. firewall.sh**
+## **1. firewall.sh**
 
 This script checks **TCP connectivity** (port 443) to all required URLs for PCAI / Developer systems.
 
@@ -46,7 +46,7 @@ A clean ✓/✗ summary showing which URLs are reachable.
 
 ---
 
-## 🌐 **2. dns-check.sh**
+## **2. dns-check.sh**
 
 This script performs:
 
@@ -75,7 +75,7 @@ The output file is ready to share with Support/Engineering.
 
 ---
 
-## 🔥🌐 **3. firewall-pcai-dns.sh**
+## **3. firewall-pcai-dns.sh**
 
 This is a **combined script** that runs both:
 
@@ -99,7 +99,7 @@ It also uses `input.txt` for DNS checks.
 
 ---
 
-## 📄 **4. input.txt**
+## **4. input.txt**
 
 Template for DNS testing.
 
@@ -107,7 +107,7 @@ Update this file with actual customer data before running `dns-check.sh` or `fir
 
 ---
 
-## 📦 **Run Directly (curl) in customer worker scs02 node or preferable some other node such as glfs which has access to internet**
+## **Run Directly (curl) in customer worker scs02 node or preferable some other node such as glfs which has access to internet**
 
 Because GitHub **raw.githubusercontent.com** is often blocked in customer sites, use this format:
 
@@ -118,7 +118,7 @@ bash <(curl -s -H "Accept: application/vnd.github.raw" https://api.github.com/re
 
 ---
 
-## 📝 Notes for Customer / Support Engineers
+## Notes for Customer / Support Engineers
 
 * These scripts require **bash**.
 * They do **not modify** the system (safe to run anywhere).
