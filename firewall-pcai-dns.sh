@@ -79,6 +79,7 @@ for url in "${URLS[@]}"; do
         ((FAIL_COUNT++))
     fi
 done
+
 # ------------------------------
 # DNS VALIDATION
 # ------------------------------
@@ -104,26 +105,21 @@ else
 
         status="FALSE"
 
-# ---------------------------------------
-# Forward lookup
-# ---------------------------------------
+        # ---------------------------------------
+        # Forward lookup
+        # ---------------------------------------
 
-if [[ "$fqdn" == \** ]]; then
-    # Wildcard DNS entries do not work reliably with getent
-    resolved_ip=$(nslookup "$fqdn" 2>/dev/null \
-        | awk '/^Address: / {print $2}' \
-        | grep -E '^[0-9]+\.' \
-        | tail -n1)
-else
-    resolved_ip=$(getent hosts "$fqdn" \
-        | awk '{print $1}' \
-        | head -n1)
-fi
+        if [[ "$fqdn" == \** ]]; then
+            # Wildcard DNS entries do not work reliably with getent
+            resolved_ip=$(dig +short "$fqdn" 2>/dev/null | tail -n1)
+        else
+            resolved_ip=$(dig +short "$fqdn" 2>/dev/null | head -n1)
+        fi
 
         # ---------------------------------------
         # Reverse lookup
         # ---------------------------------------
-        resolved_name=$(getent hosts "$ip" | awk '{print $2}' | head -n1)
+        resolved_name=$(dig -x "$ip" +short 2>/dev/null | head -n1)
 
         # Normalize hostnames
         input_base=$(echo "$fqdn" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
@@ -171,6 +167,7 @@ fi
 
     done < "$INPUT_FILE"
 fi
+
 # ------------------------------
 # FINAL REPORT
 # ------------------------------
