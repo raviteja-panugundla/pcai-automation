@@ -78,8 +78,7 @@ for url in "${URLS[@]}"; do
         echo "❌ FAILED"
         ((FAIL_COUNT++))
     fi
-done
-# ------------------------------
+done# ------------------------------
 # DNS VALIDATION
 # ------------------------------
 INPUT_FILE="input.txt"
@@ -96,32 +95,44 @@ else
         # Skip empty/header/comment lines
         [[ -z "$ip" || "$ip" =~ ^# || "$ip" == "IP Address" ]] && continue
 
-        # Trim spaces
+        # Cleanup spaces/newlines
         record_type=$(echo "$record_type" | xargs)
 
-        # Skip wildcard direct validation
-        if [[ "$fqdn" == \** ]]; then
-            echo "⚠️ Wildcard DNS entry detected: $fqdn (Skipping validation)"
-            summary+=("$ip $fqdn [$record_type] => SKIPPED-WILDCARD")
-            continue
-        fi
-
-        # Forward lookup
-        resolved_ip=$(getent hosts "$fqdn" | awk '{print $1}' | head -n1)
-
-        # Reverse lookup
-        resolved_name=$(getent hosts "$ip" | awk '{print $2}' | head -n1)
-
-        # Normalize short hostnames
-        input_base=$(echo "$fqdn" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
-        res_base=$(echo "$resolved_name" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
+        # Normalize lowercase for easy matching
+        record_type_lower=$(echo "$record_type" | tr '[:upper:]' '[:lower:]')
 
         status="FALSE"
 
         # ---------------------------------------
-        # A Record only
+        # Skip wildcard validation
         # ---------------------------------------
-        if [[ "$record_type" == "A Record" ]]; then
+        if [[ "$fqdn" == \** ]]; then
+            echo "⚠️ Wildcard entry detected: $fqdn (Skipping validation)"
+            summary+=("$ip $fqdn [$record_type] => SKIPPED-WILDCARD")
+            continue
+        fi
+
+        # ---------------------------------------
+        # Forward lookup
+        # ---------------------------------------
+        resolved_ip=$(getent hosts "$fqdn" | awk '{print $1}' | head -n1)
+
+        # ---------------------------------------
+        # Reverse lookup
+        # ---------------------------------------
+        resolved_name=$(getent hosts "$ip" | awk '{print $2}' | head -n1)
+
+        # Normalize hostnames
+        input_base=$(echo "$fqdn" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
+        res_base=$(echo "$resolved_name" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
+
+        # ---------------------------------------
+        # A Record ONLY
+        # Matches:
+        #   A record only
+        #   A Record
+        # ---------------------------------------
+        if [[ "$record_type_lower" =~ a[[:space:]]record ]]; then
 
             if [[ "$resolved_ip" == "$ip" ]]; then
                 status="TRUE"
@@ -132,8 +143,11 @@ else
 
         # ---------------------------------------
         # A + PTR Record
+        # Matches:
+        #   A and PTR Records
+        #   A and PTR Record
         # ---------------------------------------
-        elif [[ "$record_type" == "A and PTR Record" ]]; then
+        elif [[ "$record_type_lower" =~ ptr ]]; then
 
             if [[ "$resolved_ip" == "$ip" && "$input_base" == "$res_base" ]]; then
                 status="TRUE"
