@@ -105,10 +105,20 @@ else
         status="FALSE"
 
 
-        # ---------------------------------------
-        # Forward lookup
-        # ---------------------------------------
-        resolved_ip=$(getent hosts "$fqdn" | awk '{print $1}' | head -n1)
+# ---------------------------------------
+# Forward lookup
+# ---------------------------------------
+
+if [[ "$fqdn" == \** ]]; then
+    # Wildcard DNS handling
+    resolved_ip=$(nslookup "$fqdn" 2>/dev/null \
+        | awk '/^Address: / {print $2}' \
+        | tail -n1)
+else
+    resolved_ip=$(getent hosts "$fqdn" \
+        | awk '{print $1}' \
+        | head -n1)
+fi
 
         # ---------------------------------------
         # Reverse lookup
