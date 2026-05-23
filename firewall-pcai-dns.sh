@@ -104,15 +104,15 @@ else
 
         status="FALSE"
 
-
 # ---------------------------------------
 # Forward lookup
 # ---------------------------------------
 
 if [[ "$fqdn" == \** ]]; then
-    # Wildcard DNS handling
+    # Wildcard DNS entries do not work reliably with getent
     resolved_ip=$(nslookup "$fqdn" 2>/dev/null \
         | awk '/^Address: / {print $2}' \
+        | grep -E '^[0-9]+\.' \
         | tail -n1)
 else
     resolved_ip=$(getent hosts "$fqdn" \
