@@ -104,14 +104,6 @@ else
 
         status="FALSE"
 
-        # ---------------------------------------
-        # Skip wildcard validation
-        # ---------------------------------------
-        if [[ "$fqdn" == \** ]]; then
-            echo "⚠️ Wildcard entry detected: $fqdn (Skipping validation)"
-            summary+=("$ip $fqdn [$record_type] => SKIPPED-WILDCARD")
-            continue
-        fi
 
         # ---------------------------------------
         # Forward lookup
@@ -137,7 +129,11 @@ else
 
             if [[ "$resolved_ip" == "$ip" ]]; then
                 status="TRUE"
-                echo "✅ [A] $fqdn -> $ip"
+                if [[ "$fqdn" == \** ]]; then
+                  echo "✅ [Wildcard-A] $fqdn -> $ip"
+                else
+                  echo "✅ [A] $fqdn -> $ip"
+                fi
             else
                 echo "❌ [A] $fqdn mismatch (Resolved: $resolved_ip Expected: $ip)"
             fi
