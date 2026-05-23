@@ -79,7 +79,6 @@ for url in "${URLS[@]}"; do
         ((FAIL_COUNT++))
     fi
 done
-
 # ------------------------------
 # DNS VALIDATION
 # ------------------------------
@@ -92,13 +91,20 @@ else
 
     declare -a summary
 
-    while IFS=$'\t' read -r ip fqdn type id record_type; do
+    while IFS=$'\t' read -r ip fqdn node_type component_id record_type temp_ip; do
 
         # Skip empty/header/comment lines
-        [[ -z "$ip" || "$ip" =~ ^# || "$ip" == "IP" ]] && continue
+        [[ -z "$ip" || "$ip" =~ ^# || "$ip" == "IP Address" ]] && continue
 
-        # Normalize spaces
+        # Trim spaces
         record_type=$(echo "$record_type" | xargs)
+
+        # Skip wildcard direct validation
+        if [[ "$fqdn" == \** ]]; then
+            echo "⚠️ Wildcard DNS entry detected: $fqdn (Skipping validation)"
+            summary+=("$ip $fqdn [$record_type] => SKIPPED-WILDCARD")
+            continue
+        fi
 
         # Forward lookup
         resolved_ip=$(getent hosts "$fqdn" | awk '{print $1}' | head -n1)
@@ -106,14 +112,14 @@ else
         # Reverse lookup
         resolved_name=$(getent hosts "$ip" | awk '{print $2}' | head -n1)
 
-        # Normalize names
+        # Normalize short hostnames
         input_base=$(echo "$fqdn" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
         res_base=$(echo "$resolved_name" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
 
         status="FALSE"
 
         # ---------------------------------------
-        # A Record Only Check
+        # A Record only
         # ---------------------------------------
         if [[ "$record_type" == "A Record" ]]; then
 
@@ -125,7 +131,7 @@ else
             fi
 
         # ---------------------------------------
-        # A + PTR Check
+        # A + PTR Record
         # ---------------------------------------
         elif [[ "$record_type" == "A and PTR Record" ]]; then
 
