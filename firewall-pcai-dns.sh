@@ -53,24 +53,20 @@ echo -e "\n--- Checking Connectivity (HTTPS Primary) ---"
 PASS_COUNT=0
 FAIL_COUNT=0
 
-for url in "${URLS[@]}"; do
-    # Extract host reliably and determine port
-    host=$(echo "$url" | sed -e 's|^[^/]*//||' -e 's|/.*$||')
-    
-    # Check if URL explicitly uses http, otherwise default to 443 (HTTPS)
+check_connectivity() {
+    local url=$1
+    local host=$(echo "$url" | sed -e 's|^[^/]*//||' -e 's|/.*$||')
+    local port=443
+
     if [[ "$url" =~ ^http:// ]]; then
         port=80
-    else
-        port=443
     fi
 
     printf "%-65s" "$host"
 
-    # 1. Attempt curl (Best for HTTPS handshake & Proxies)
     if curl -skL --connect-timeout 5 "$url" -o /dev/null &>/dev/null; then
         echo "✅ Reachable (HTTPS)"
         ((PASS_COUNT++))
-    # 2. Fallback to raw TCP (Useful if curl is missing or restricted)
     elif timeout 3 bash -c "</dev/tcp/$host/$port" &>/dev/null; then
         echo "✅ Reachable (TCP)"
         ((PASS_COUNT++))
@@ -78,6 +74,10 @@ for url in "${URLS[@]}"; do
         echo "❌ FAILED"
         ((FAIL_COUNT++))
     fi
+}
+
+for url in "${URLS[@]}"; do
+    check_connectivity "$url"
 done
 
 # ------------------------------
@@ -93,46 +93,25 @@ else
     declare -a summary
 
     while IFS=$'\t' read -r ip fqdn node_type component_id record_type temp_ip; do
-
-        # Skip empty/header/comment lines
         [[ -z "$ip" || "$ip" =~ ^# || "$ip" == "IP Address" ]] && continue
 
-        # Cleanup spaces/newlines
         record_type=$(echo "$record_type" | xargs)
-
-        # Normalize lowercase for easy matching
         record_type_lower=$(echo "$record_type" | tr '[:upper:]' '[:lower:]')
 
         status="FALSE"
 
-        # ---------------------------------------
-        # Forward lookup
-        # ---------------------------------------
-
         if [[ "$fqdn" == \** ]]; then
-            # Wildcard DNS entries do not work reliably with getent
             resolved_ip=$(dig +short "$fqdn" 2>/dev/null | tail -n1)
         else
             resolved_ip=$(dig +short "$fqdn" 2>/dev/null | head -n1)
         fi
 
-        # ---------------------------------------
-        # Reverse lookup
-        # ---------------------------------------
         resolved_name=$(dig -x "$ip" +short 2>/dev/null | head -n1)
 
-        # Normalize hostnames
         input_base=$(echo "$fqdn" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
         res_base=$(echo "$resolved_name" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
 
-        # ---------------------------------------
-        # A Record ONLY
-        # Matches:
-        #   A record only
-        #   A Record
-        # ---------------------------------------
         if [[ "$record_type_lower" =~ a[[:space:]]record ]]; then
-
             if [[ "$resolved_ip" == "$ip" ]]; then
                 status="TRUE"
                 if [[ "$fqdn" == \** ]]; then
@@ -143,28 +122,18 @@ else
             else
                 echo "❌ [A] $fqdn mismatch (Resolved: $resolved_ip Expected: $ip)"
             fi
-
-        # ---------------------------------------
-        # A + PTR Record
-        # Matches:
-        #   A and PTR Records
-        #   A and PTR Record
-        # ---------------------------------------
         elif [[ "$record_type_lower" =~ ptr ]]; then
-
             if [[ "$resolved_ip" == "$ip" && "$input_base" == "$res_base" ]]; then
                 status="TRUE"
                 echo "✅ [A+PTR] $fqdn <-> $ip"
             else
                 echo "❌ [A+PTR] $fqdn mismatch (A: $resolved_ip PTR: $resolved_name)"
             fi
-
         else
             echo "⚠️ Unknown record type for $fqdn : $record_type"
         fi
 
         summary+=("$ip $fqdn [$record_type] => $status")
-
     done < "$INPUT_FILE"
 fi
 
