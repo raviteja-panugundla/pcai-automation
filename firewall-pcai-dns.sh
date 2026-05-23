@@ -78,7 +78,8 @@ for url in "${URLS[@]}"; do
         echo "❌ FAILED"
         ((FAIL_COUNT++))
     fi
-done# ------------------------------
+done
+# ------------------------------
 # DNS VALIDATION
 # ------------------------------
 INPUT_FILE="input.txt"
