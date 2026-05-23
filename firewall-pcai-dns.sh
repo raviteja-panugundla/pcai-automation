@@ -84,33 +84,66 @@ done
 # DNS VALIDATION
 # ------------------------------
 INPUT_FILE="input.txt"
+
 if [[ ! -f "$INPUT_FILE" ]]; then
     echo -e "\nNo '$INPUT_FILE' found. Skipping DNS checks."
 else
     echo -e "\n--- DNS Forward/Reverse Validation ---"
+
     declare -a summary
-    while read -r ip fqdn _; do
+
+    while IFS=$'\t' read -r ip fqdn type id record_type; do
+
+        # Skip empty/header/comment lines
         [[ -z "$ip" || "$ip" =~ ^# || "$ip" == "IP" ]] && continue
-        
-        # Get actual system resolution
+
+        # Normalize spaces
+        record_type=$(echo "$record_type" | xargs)
+
+        # Forward lookup
         resolved_ip=$(getent hosts "$fqdn" | awk '{print $1}' | head -n1)
+
+        # Reverse lookup
         resolved_name=$(getent hosts "$ip" | awk '{print $2}' | head -n1)
 
-        # Normalize to lowercase for comparison
+        # Normalize names
         input_base=$(echo "$fqdn" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
         res_base=$(echo "$resolved_name" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
 
         status="FALSE"
-        if [[ "$resolved_ip" == "$ip" && "$input_base" == "$res_base" ]]; then
-            status="TRUE"
-            echo "✅ $fqdn matches $ip"
+
+        # ---------------------------------------
+        # A Record Only Check
+        # ---------------------------------------
+        if [[ "$record_type" == "A Record" ]]; then
+
+            if [[ "$resolved_ip" == "$ip" ]]; then
+                status="TRUE"
+                echo "✅ [A] $fqdn -> $ip"
+            else
+                echo "❌ [A] $fqdn mismatch (Resolved: $resolved_ip Expected: $ip)"
+            fi
+
+        # ---------------------------------------
+        # A + PTR Check
+        # ---------------------------------------
+        elif [[ "$record_type" == "A and PTR Record" ]]; then
+
+            if [[ "$resolved_ip" == "$ip" && "$input_base" == "$res_base" ]]; then
+                status="TRUE"
+                echo "✅ [A+PTR] $fqdn <-> $ip"
+            else
+                echo "❌ [A+PTR] $fqdn mismatch (A: $resolved_ip PTR: $resolved_name)"
+            fi
+
         else
-            echo "❌ Mismatch for $fqdn (IP: $resolved_ip, PTR: $resolved_name)"
+            echo "⚠️ Unknown record type for $fqdn : $record_type"
         fi
-        summary+=("$ip $fqdn => $status")
+
+        summary+=("$ip $fqdn [$record_type] => $status")
+
     done < "$INPUT_FILE"
 fi
-
 # ------------------------------
 # FINAL REPORT
 # ------------------------------
