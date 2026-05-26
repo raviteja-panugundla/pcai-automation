@@ -394,13 +394,14 @@ def _ssh_pty(host, user, password, command, timeout=30):
 
             if not password_sent:
                 if re.search(rb'[Pp]assword.*:', output):
-                    time.sleep(0.1)
+                    time.sleep(0.2)  # let prompt fully flush
                     try:
                         os.write(master, password.encode() + b'\n')
                     except OSError:
                         break
                     password_sent = True
                     output = b''
+                    time.sleep(0.5)  # give command time to start executing
                 elif re.search(rb'[Pp]ermission denied|[Aa]uth.*fail', output):
                     proc.kill()
                     try: os.close(master)
@@ -412,10 +413,11 @@ def _ssh_pty(host, user, password, command, timeout=30):
                     except: pass
                     return '', 1, 'unreachable'
         elif proc.poll() is not None:
-            # drain remaining
+            # Process finished — drain remaining output (give pty buffer time to flush)
+            time.sleep(0.3)
             try:
                 while True:
-                    r2, _, _ = select.select([master], [], [], 0.2)
+                    r2, _, _ = select.select([master], [], [], 0.3)
                     if r2:
                         try: output += os.read(master, 4096)
                         except OSError: break
@@ -430,9 +432,12 @@ def _ssh_pty(host, user, password, command, timeout=30):
     if re.search(rb'[Pp]ermission denied|[Aa]uth.*fail', output):
         return '', 1, 'auth_failed'
 
-    clean = re.sub(rb'\x1b\[[0-9;]*[a-zA-Z]', b'', output)
+    clean = re.sub(rb'\x1b\[[0-9;]*[a-zA-Z]', b'', output)  # strip ANSI
     clean = re.sub(rb'\r\n|\r', b'\n', clean)
-    return clean.decode(errors='ignore').strip(), proc.poll() or 0, 'ok'
+    text  = clean.decode(errors='ignore')
+    # Strip shell prompt lines (e.g. "user@host:~$ ") from output
+    text  = re.sub(r'^[^\n]*@[^\n]*[\$#]\s*', '', text, flags=re.MULTILINE)
+    return text.strip(), proc.poll() or 0, 'ok'
 
 
 def ssh_run(host, user, password, command, timeout=30):
@@ -655,23 +660,36 @@ def phase3_network_interfaces(nodes, expected_nodes, gpu_prefixes, auth):
         hw_type   = node.get('hw_type', '')
         node_header(f'{comp_id} | {hostname} | {hw_type}')
 
-        out, status = auth.ssh(comp_id, 'ip -br a')
+        # Combine hostname + ip -br a in single SSH call to avoid pty timing issues
+        combined_out, status = auth.ssh(comp_id,
+            "echo '===HOSTNAME==='; hostname -s; echo '===IFACES==='; ip -br a")
         if status != 'ok':
             R.record(status, f'{hostname} — {status.upper()}', hostname)
             continue
+
+        # Split combined output
+        hn_out = ''
+        out = combined_out
+        if '===HOSTNAME===' in combined_out and '===IFACES===' in combined_out:
+            parts = combined_out.split('===IFACES===', 1)
+            out = parts[1] if len(parts) > 1 else combined_out
+            hn_section = parts[0].replace('===HOSTNAME===', '')
+            # Take last non-empty line from hostname section (strip shell prompt noise)
+            hn_lines = [l.strip() for l in hn_section.splitlines()
+                        if l.strip() and not l.strip().startswith('$') and '@' not in l]
+            hn_out = hn_lines[-1] if hn_lines else ''
 
         expected = expected_nodes.get(comp_id, {})
         exp_ifaces = expected.get('interfaces', {})
 
         # Hostname check
-        hn_out, hn_status = auth.ssh(comp_id, 'hostname -s')
-        if hn_status == 'ok':
-            expected_hn = expected.get('hostname', '')
-            if expected_hn and hn_out.strip().lower() == expected_hn.lower():
-                R.record('ok', f'Hostname: {hn_out.strip()}', hostname)
-            elif expected_hn:
+        expected_hn = expected.get('hostname', '')
+        if expected_hn:
+            if hn_out.lower() == expected_hn.lower():
+                R.record('ok', f'Hostname: {hn_out}', hostname)
+            else:
                 R.record('fail',
-                    f'Hostname: got "{hn_out.strip()}", expected "{expected_hn}"', hostname)
+                    f'Hostname: got "{hn_out}", expected "{expected_hn}"', hostname)
 
         # Interface IP checks
         for iface, expected_ip in exp_ifaces.items():
@@ -757,7 +775,16 @@ def phase5_dns(nodes, dns_entries, auth):
     if not worker:
         R.record('warn', 'No worker available for DNS checks'); return
 
+    # Deduplicate DNS entries by (ip, fqdn) pair to avoid double-checking
+    seen = set()
+    unique_entries = []
     for entry in dns_entries:
+        key = (entry['ip'], entry['fqdn'])
+        if key not in seen:
+            seen.add(key)
+            unique_entries.append(entry)
+
+    for entry in unique_entries:
         ip, fqdn, rtype = entry['ip'], entry['fqdn'], entry['record_type']
         label = f'{ip:<18} ↔ {fqdn:<45} [{rtype}]'
 
