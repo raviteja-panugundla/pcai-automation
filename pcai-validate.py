@@ -779,16 +779,18 @@ def phase3_network_interfaces(nodes, expected_nodes, gpu_prefixes, auth):
             R.record(status, f'{hostname} — {status.upper()}', hostname)
             continue
 
-        # Split combined output
+        # Split combined output.
+        # pty's -tt echoes the command back, which also contains the marker strings.
+        # Use rfind to always pick the LAST occurrence (actual echo output, not command echo).
         hn_out = ''
         out = combined_out
-        if '===HOSTNAME===' in combined_out and '===IFACES===' in combined_out:
-            parts = combined_out.split('===IFACES===', 1)
-            out = parts[1] if len(parts) > 1 else combined_out
-            hn_section = parts[0].replace('===HOSTNAME===', '')
-            # Take last non-empty line from hostname section (strip shell prompt noise)
+        hi = combined_out.rfind('===HOSTNAME===')
+        ii = combined_out.rfind('===IFACES===')
+        if hi != -1 and ii != -1 and hi < ii:
+            hn_section = combined_out[hi + len('===HOSTNAME==='):ii]
+            out = combined_out[ii + len('===IFACES==='):]
             hn_lines = [l.strip() for l in hn_section.splitlines()
-                        if l.strip() and not l.strip().startswith('$') and '@' not in l]
+                        if l.strip() and '@' not in l and not l.strip().startswith('$')]
             hn_out = hn_lines[-1] if hn_lines else ''
 
         expected = expected_nodes.get(comp_id, {})
