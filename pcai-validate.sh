@@ -1,0 +1,1 @@
+/mnt/c/Users/panugund/Music/QNB-pcai 3 units/QNB-DC_UAT/QNB-DC_UAT/pcai-automation/pcai-validate.sh
