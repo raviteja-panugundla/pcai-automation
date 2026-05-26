@@ -10,6 +10,19 @@ Options:
   --region jp1|us1|uk1|eu1       (default: us1)
   --skip-firewall                skip Phase 6 URL checks
   --skip-dns                     skip Phase 5 DNS checks
+  --ssh-user  <username>         override SSH username for all nodes
+  --key-file  <path/privkey.pem> use SSH private key file for all nodes
+  --cipher    <cipher>           SSH cipher override (e.g. aes256-ctr)
+
+Examples:
+  # Password auth (from infra-layout.json creds):
+  python3 pcai-validate.py networks.xlsx base-configuration.json infra-layout.json
+
+  # Key file auth for all nodes (workers use pcadmin + key):
+  python3 pcai-validate.py networks.xlsx base-configuration.json infra-layout.json \\
+      --ssh-user pcadmin --key-file privkey.pem --cipher aes256-ctr
+
+  # Control nodes (hpesupport) — no global override, prompts if creds wrong
 
 Stdlib only — no pip install needed.
 Python 3.6+ required (pre-installed on RHEL 10 / Ubuntu 24).
@@ -440,11 +453,40 @@ def _ssh_pty(host, user, password, command, timeout=30):
     return text.strip(), proc.poll() or 0, 'ok'
 
 
-def ssh_run(host, user, password, command, timeout=30):
-    """Run SSH command. Returns (output, returncode, status)"""
-    if _has_sshpass():
+def _ssh_keyfile(host, user, key_file, command, timeout=30, cipher=None):
+    """SSH using private key file (no password needed). Returns (output, rc, status)."""
+    cmd = ['ssh',
+           '-o', 'StrictHostKeyChecking=no',
+           '-o', f'ConnectTimeout={min(timeout, 10)}',
+           '-o', 'BatchMode=yes',
+           '-o', 'LogLevel=ERROR',
+           '-i', key_file]
+    if cipher:
+        cmd += ['-c', cipher]
+    cmd += [f'{user}@{host}', command]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if 'Permission denied' in r.stderr or 'invalid key' in r.stderr.lower():
+            return '', 1, 'auth_failed'
+        if 'Connection refused' in r.stderr or 'No route to host' in r.stderr:
+            return '', 1, 'unreachable'
+        out = r.stdout.strip()
+        return out, r.returncode, 'ok'
+    except subprocess.TimeoutExpired:
+        return '', -1, 'timeout'
+    except Exception as e:
+        return '', -1, f'error: {e}'
+
+
+def ssh_run(host, user, command, timeout=30, password=None, key_file=None, cipher=None):
+    """Run SSH command. Supports password auth or key file. Returns (output, rc, status)"""
+    if key_file:
+        return _ssh_keyfile(host, user, key_file, command, timeout, cipher)
+    if _has_sshpass() and password:
         return _ssh_sshpass(host, user, password, command, timeout)
-    return _ssh_pty(host, user, password, command, timeout)
+    if password:
+        return _ssh_pty(host, user, password, command, timeout)
+    return '', 1, 'auth_failed'
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -453,17 +495,16 @@ def ssh_run(host, user, password, command, timeout=30):
 
 class AuthManager:
     def __init__(self, nodes):
-        self.nodes   = nodes          # from load_configs()
-        self._override = {}           # comp_id -> {'user':..,'pass':..}
+        self.nodes     = nodes      # from load_configs()
+        self._override = {}         # comp_id -> {'user':..,'pass':..,'key_file':..,'cipher':..}
 
     def _os_creds(self, comp_id):
         """Get OS SSH credentials for a node (from config or override)."""
         if comp_id in self._override:
             return self._override[comp_id]
         creds = self.nodes.get(comp_id, {}).get('creds', {})
-        # Prefer OS creds, then HOST, then hvadmin fallback
         for target in ['OS', 'HOST']:
-            if target in creds and creds[target].get('pass'):
+            if target in creds and (creds[target].get('pass') or creds[target].get('key_file')):
                 return creds[target]
         return None
 
@@ -471,14 +512,60 @@ class AuthManager:
         creds = self.nodes.get(comp_id, {}).get('creds', {})
         return creds.get('ILO') or creds.get('ILO_FACTORY_DEFAULT')
 
+    def _do_ssh(self, host, creds, command, timeout):
+        """Run SSH using whatever auth method is in creds dict."""
+        return ssh_run(
+            host, creds['user'], command, timeout,
+            password=creds.get('pass'),
+            key_file=creds.get('key_file'),
+            cipher=creds.get('cipher'),
+        )
+
+    def _prompt_auth(self, hostname, host, current_user):
+        """
+        Interactive prompt when auth fails.
+        Returns new creds dict or None to skip.
+        """
+        print(f'\n  {YELLOW}⚠️  Auth failed for {hostname} ({host}) as {current_user}{RESET}')
+        print(f'  Options:')
+        print(f'    1) Enter different username + password')
+        print(f'    2) Use SSH private key file')
+        print(f'    Enter = skip this node')
+        try:
+            choice = input('  Choice [1/2/Enter to skip]: ').strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+
+        if choice == '1':
+            try:
+                new_user = input(f'  Username [{current_user}]: ').strip() or current_user
+                new_pass = getpass.getpass(f'  Password for {new_user}@{host}: ')
+            except (EOFError, KeyboardInterrupt):
+                return None
+            return {'user': new_user, 'pass': new_pass} if new_pass else None
+
+        elif choice == '2':
+            try:
+                key_path = input('  Path to private key file (e.g. privkey.pem): ').strip()
+                new_user = input(f'  Username [{current_user}]: ').strip() or current_user
+                cipher   = input('  Cipher (Enter for default, e.g. aes256-ctr): ').strip() or None
+            except (EOFError, KeyboardInterrupt):
+                return None
+            if not key_path or not os.path.exists(key_path):
+                print(f'  {RED}Key file not found: {key_path}{RESET}')
+                return None
+            return {'user': new_user, 'key_file': key_path, 'cipher': cipher}
+
+        return None
+
     def ssh(self, comp_id, command, timeout=30):
         """
         SSH to node's mgmt IP. Returns (output, status).
-        Prompts user interactively if auth fails.
+        Prompts interactively if auth fails (offers password or key file).
         status: 'ok' | 'auth_failed' | 'unreachable' | 'skipped' | 'timeout'
         """
-        node    = self.nodes.get(comp_id, {})
-        host    = node.get('mgmt_ip', '')
+        node     = self.nodes.get(comp_id, {})
+        host     = node.get('mgmt_ip', '')
         hostname = node.get('hostname', comp_id)
 
         if not host:
@@ -487,28 +574,24 @@ class AuthManager:
 
         creds = self._os_creds(comp_id)
         if not creds:
-            warn(f'{hostname}: no OS credentials in config — skipping')
-            return '', 'skipped'
-
-        out, rc, status = ssh_run(host, creds['user'], creds['pass'], command, timeout)
-
-        if status == 'auth_failed':
-            # ── prompt for alternate password ─────────────────────────────
-            print(f'\n  {YELLOW}⚠️  Auth failed for {hostname} ({host}) as {creds["user"]}{RESET}')
-            try:
-                new_pass = getpass.getpass(
-                    f'  Enter password for {creds["user"]}@{host} (Enter to skip): ')
-            except (EOFError, KeyboardInterrupt):
-                new_pass = ''
-
-            if not new_pass:
-                skip(f'{hostname} ({host}) — SKIPPED (wrong password)')
+            # No creds at all — prompt immediately
+            print(f'\n  {YELLOW}⚠️  No credentials found for {hostname} ({host}){RESET}')
+            creds = self._prompt_auth(hostname, host, 'root')
+            if not creds:
+                skip(f'{hostname} — SKIPPED (no credentials)')
                 return '', 'skipped'
 
-            out, rc, status = ssh_run(host, creds['user'], new_pass, command, timeout)
+        out, rc, status = self._do_ssh(host, creds, command, timeout)
+
+        if status == 'auth_failed':
+            new_creds = self._prompt_auth(hostname, host, creds.get('user', '?'))
+            if not new_creds:
+                skip(f'{hostname} ({host}) — SKIPPED (auth failed)')
+                return '', 'skipped'
+
+            out, rc, status = self._do_ssh(host, new_creds, command, timeout)
             if status == 'ok':
-                # save so we don't ask again for this node
-                self._override[comp_id] = {'user': creds['user'], 'pass': new_pass}
+                self._override[comp_id] = new_creds
             else:
                 fail(f'{hostname} ({host}) — auth still failed after retry')
                 return '', 'auth_failed'
@@ -636,8 +719,12 @@ def phase2_redfish(nodes, expected_nodes, auth):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _extract_ip(ip_br_output, iface):
-    """Extract first non-link-local IP for an interface from ip -br a output."""
-    for line in ip_br_output.splitlines():
+    """Extract first non-link-local IP for an interface from ip -br a output.
+    Also does fuzzy matching for VLAN-tagged variants (e.g. bond0.2022@bond0 for mgt@bond0)."""
+    lines = ip_br_output.splitlines()
+
+    # Exact match first
+    for line in lines:
         parts = line.split()
         if not parts or parts[0] != iface:
             continue
@@ -645,7 +732,32 @@ def _extract_ip(ip_br_output, iface):
             addr = part.split('/')[0]
             if not addr.startswith('fe80') and not addr.startswith('127.'):
                 return addr, parts[1] if len(parts) > 1 else ''
+
+    # Fuzzy match: strip VLAN tags — e.g. "bond0.2022@bond0" matches "mgt@bond0"
+    # strategy: if expected iface is X@Y, look for anything@Y or X.NNNN@Y
+    if '@' in iface:
+        base_alias, base_dev = iface.split('@', 1)
+        for line in lines:
+            parts = line.split()
+            if not parts: continue
+            name = parts[0]
+            if name.endswith(f'@{base_dev}') and name != iface:
+                for part in parts[2:]:
+                    addr = part.split('/')[0]
+                    if not addr.startswith('fe80') and not addr.startswith('127.'):
+                        return addr, (parts[1] if len(parts) > 1 else '') + f'[as {name}]'
+
     return '', ''
+
+
+def _get_all_ifaces(ip_br_output):
+    """Return list of all interface names from ip -br a output."""
+    names = []
+    for line in ip_br_output.splitlines():
+        parts = line.split()
+        if parts and re.match(r'[a-zA-Z0-9@._\-]+', parts[0]):
+            names.append(parts[0])
+    return names
 
 
 def phase3_network_interfaces(nodes, expected_nodes, gpu_prefixes, auth):
@@ -692,22 +804,37 @@ def phase3_network_interfaces(nodes, expected_nodes, gpu_prefixes, auth):
                     f'Hostname: got "{hn_out}", expected "{expected_hn}"', hostname)
 
         # Interface IP checks
+        found_any_iface = bool(_get_all_ifaces(out))
         for iface, expected_ip in exp_ifaces.items():
             actual_ip, state = _extract_ip(out, iface)
-            label = f'{iface:<14} {state:<6} {actual_ip or "NO IP":<20}'
+            # Strip fuzzy match marker from state for comparison
+            state_clean = state.split('[')[0].strip()
+            label = f'{iface:<14} {state_clean:<6} {actual_ip or "NO IP":<20}'
 
             if not actual_ip and not state:
+                if not found_any_iface:
+                    R.record('warn',
+                        f'{iface}: no interfaces captured (SSH output empty?)', hostname)
+                else:
+                    R.record('fail',
+                        f'{iface}: NOT FOUND (expected {expected_ip})', hostname)
+            elif 'UP' not in state_clean:
                 R.record('fail',
-                    f'{iface}: interface NOT FOUND (expected {expected_ip})', hostname)
-            elif state != 'UP':
-                R.record('fail',
-                    f'{iface}: state={state} (expected UP)', hostname)
+                    f'{iface}: state={state_clean} (expected UP)', hostname)
             elif actual_ip == expected_ip:
-                R.record('ok',
-                    f'{label}expected={expected_ip}  ✓', hostname)
+                fuzzy = f' [matched as {state.split("[as ")[-1].rstrip("]")}]' if '[as ' in state else ''
+                R.record('ok', f'{label}expected={expected_ip}  ✓{fuzzy}', hostname)
             else:
                 R.record('fail',
                     f'{iface}: got={actual_ip}, expected={expected_ip}  MISMATCH', hostname)
+
+        # Show actual interfaces found (helpful when expected names don't match)
+        if not found_any_iface and exp_ifaces:
+            R.record('warn', f'No interfaces in SSH output — check SSH auth', hostname)
+        elif found_any_iface and any(
+                not _extract_ip(out, iface)[1] for iface in exp_ifaces):
+            actual_names = _get_all_ifaces(out)
+            info(f'  Interfaces found on {hostname}: {", ".join(actual_names)}')
 
         # GPU compute prefix checks (workers only)
         if 'DL380a' in hw_type or 'pcai' in node.get('hw_type','').lower():
@@ -896,20 +1023,29 @@ def main():
         print(__doc__)
         sys.exit(0)
 
-    xlsx_path       = args[0]
-    base_cfg_path   = args[1]
+    xlsx_path         = args[0]
+    base_cfg_path     = args[1]
     infra_layout_path = args[2]
 
-    mode   = 'pcai-gen2'
-    region = 'us1'
+    mode          = 'pcai-gen2'
+    region        = 'us1'
     skip_firewall = False
     skip_dns      = False
+    global_key_file = None   # override key file for all nodes
+    global_ssh_user = None   # override SSH username for all nodes
+    global_cipher   = None   # override SSH cipher
 
-    for i, a in enumerate(args[3:], 3):
-        if a == '--mode'          and i+1 < len(args): mode   = args[i+1]
-        if a == '--region'        and i+1 < len(args): region = args[i+1]
+    i = 3
+    while i < len(args):
+        a = args[i]
+        if a == '--mode'          and i+1 < len(args): mode   = args[i+1]; i += 2; continue
+        if a == '--region'        and i+1 < len(args): region = args[i+1]; i += 2; continue
+        if a == '--key-file'      and i+1 < len(args): global_key_file = args[i+1]; i += 2; continue
+        if a == '--ssh-user'      and i+1 < len(args): global_ssh_user = args[i+1]; i += 2; continue
+        if a == '--cipher'        and i+1 < len(args): global_cipher   = args[i+1]; i += 2; continue
         if a == '--skip-firewall': skip_firewall = True
         if a == '--skip-dns':      skip_dns      = True
+        i += 1
 
     # ── Load data ─────────────────────────────────────────────────────────────
     print(f'{CYAN}Parsing Excel: {xlsx_path} ...{RESET}')
@@ -926,6 +1062,19 @@ def main():
 
     auth = AuthManager(nodes)
 
+    # Apply global SSH overrides (--key-file / --ssh-user / --cipher)
+    if global_key_file or global_ssh_user:
+        if global_key_file and not os.path.exists(global_key_file):
+            print(f'{RED}ERROR: Key file not found: {global_key_file}{RESET}'); sys.exit(1)
+        for comp_id in nodes:
+            existing = auth._os_creds(comp_id) or {}
+            auth._override[comp_id] = {
+                'user':     global_ssh_user or existing.get('user', 'root'),
+                'key_file': global_key_file,
+                'pass':     None if global_key_file else existing.get('pass'),
+                'cipher':   global_cipher,
+            }
+
     customer_id = meta.get('SCID Number', 'unknown')
     timestamp   = datetime.now().strftime('%Y%m%d-%H%M%S')
     report_file = f'pcai-validate-{customer_id}-{timestamp}.txt'
@@ -938,7 +1087,10 @@ def main():
     _tee(f'  Excel   : {xlsx_path}')
     _tee(f'  Configs : {base_cfg_path}  +  {infra_layout_path}')
     _tee(f'  Mode    : {mode}   Region: {region}')
-    _tee(f'  SSH via : {"sshpass" if _has_sshpass() else "python pty (stdlib)"}')
+    ssh_method = 'key file' if global_key_file else ('sshpass' if _has_sshpass() else 'python pty')
+    _tee(f'  SSH via : {ssh_method}')
+    if global_key_file:
+        _tee(f'  Key     : {global_key_file}  (user: {global_ssh_user or "from config"})')
 
     # ── Run phases ────────────────────────────────────────────────────────────
     phase1_ilo_reachability(nodes)
